@@ -9,9 +9,15 @@ import SwiftUI
 
 @main
 struct MQTTFleetTrackerApp: App {
+    
+    private let mqttManager = MQTTManager()
+    
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .onAppear{
+                    mqttManager.conncect()
+                }
         }
     }
 }
