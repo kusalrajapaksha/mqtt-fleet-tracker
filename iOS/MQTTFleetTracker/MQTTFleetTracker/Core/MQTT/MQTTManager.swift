@@ -12,6 +12,8 @@ final class MQTTManager: NSObject {
     
     private var mqtt: CocoaMQTT?
     
+    var onLocationReceived: ((VehicleLocation) -> Void)?
+    
     func conncect() {
         let clientID = "ios-fleet-tracker-\(UUID().uuidString)"
         
@@ -93,6 +95,7 @@ extension MQTTManager: CocoaMQTTDelegate {
                 from: data
             )
             
+            onLocationReceived?(location)
             print("Vehicle: \(location.vehicleId)")
             print("Latitude: \(location.latitude)")
             print("Longitude: \(location.longitude)")

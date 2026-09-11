@@ -10,14 +10,16 @@ import SwiftUI
 @main
 struct MQTTFleetTrackerApp: App {
     
-    private let mqttManager = MQTTManager()
+    private let viewModel: FleetViewModel
+    
+    init() {
+        let mqttManager = MQTTManager()
+        viewModel = FleetViewModel(mqttManager: mqttManager)
+    }
     
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .onAppear{
-                    mqttManager.conncect()
-                }
+            FleetView(viewModel: viewModel)
         }
     }
 }
