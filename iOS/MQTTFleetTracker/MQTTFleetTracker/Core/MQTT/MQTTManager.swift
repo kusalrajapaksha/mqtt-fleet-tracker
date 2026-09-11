@@ -53,7 +53,8 @@ extension MQTTManager: CocoaMQTTDelegate {
         didConnectAck ack: CocoaMQTTConnAck
     ) {
         print("MQTT connected!")
-        subscribe(to: "fleet/VH-001/location")
+        subscribe(to: "fleet/+/location")
+        //+ is an MQTT wildcard for one level.
     }
 
     func mqtt(
