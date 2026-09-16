@@ -11,10 +11,13 @@ import CocoaMQTT
 final class MQTTManager: NSObject {
     
     private var mqtt: CocoaMQTT?
+    private var reconnectAttempts = 0
+    private let maxReconnectAttempts = 5
     
     var onLocationReceived: ((VehicleLocation) -> Void)?
+    var onConnectionStatusChanged: ((Bool) -> Void)?
     
-    func conncect() {
+    func connect() {
         let clientID = "ios-fleet-tracker-\(UUID().uuidString)"
         
         let mqtt = CocoaMQTT(
@@ -37,6 +40,27 @@ final class MQTTManager: NSObject {
         _ = mqtt.connect()
     }
     
+    func reconnectIfNeeded() {
+        guard reconnectAttempts < maxReconnectAttempts else {
+            print("Max reconnect attempts reached. Giving up.")
+            return
+        }
+        
+        reconnectAttempts += 1
+        
+        let delay = min(Double(reconnectAttempts) * 2.0, 10)
+        
+        print("Reconnecting in \(delay) seconds...")
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self else {
+                return
+            }
+            self.connect()
+        }
+
+    }
+    
     func subscribe(to topic: String) {
         mqtt?.subscribe(
             [
@@ -53,6 +77,8 @@ extension MQTTManager: CocoaMQTTDelegate {
         didConnectAck ack: CocoaMQTTConnAck
     ) {
         print("MQTT connected!")
+        reconnectAttempts = 0
+        onConnectionStatusChanged?(true)
         subscribe(to: "fleet/+/location")
         //+ is an MQTT wildcard for one level.
     }
@@ -139,6 +165,8 @@ extension MQTTManager: CocoaMQTTDelegate {
         withError err: Error?
     ) {
         print("MQTT disconnected")
+        onConnectionStatusChanged?(false)
+        reconnectIfNeeded()
         if let err {
             print("Error: \(err)")
         }

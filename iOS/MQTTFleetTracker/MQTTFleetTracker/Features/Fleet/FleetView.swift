@@ -8,9 +8,6 @@
 import SwiftUI
 import MapKit
 
-import SwiftUI
-import MapKit
-
 struct FleetView: View {
     let viewModel: FleetViewModel
 
@@ -31,6 +28,7 @@ struct FleetView: View {
         )
     
     @State private var searchText = ""
+    @State private var currentTime = Date()
 
     var selectedVehicle: Vehicle? {
         guard let selectedVehicleID else {
@@ -51,16 +49,70 @@ struct FleetView: View {
             $0.id.localizedCaseInsensitiveContains(searchText)
         }
     }
+    
+    var selectedVehicleHistory: [CLLocationCoordinate2D] {
+        guard let selectedVehicleID else {
+            return []
+        }
+
+        return (viewModel.vehicleHistory[selectedVehicleID] ?? [])
+            .map {
+                CLLocationCoordinate2D(
+                    latitude: $0.latitude,
+                    longitude: $0.longitude
+                )
+            }
+    }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                HStack {
+                    Circle()
+                        .fill(viewModel.isConnected ? .green : .red)
+                        .frame(width: 10, height: 10)
+
+                    Text(
+                        viewModel.isConnected
+                        ? "MQTT Connected"
+                        : "MQTT Disconnected"
+                    )
+                    .font(.caption)
+                    .fontWeight(.semibold)
+
+                    Spacer()
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                .background(.regularMaterial)
+                
                 Map(
                     position: $cameraPosition,
                     selection: $selectedVehicleID
                 ) {
+                    ForEach(Array(viewModel.vehicles.keys), id: \.self) { vehicleID in
+                        if let history = viewModel.vehicleHistory[vehicleID] {
+                            MapPolyline(
+                                coordinates: history.map({
+                                    CLLocationCoordinate2D(
+                                        latitude: $0.latitude,
+                                        longitude: $0.longitude
+                                    )
+                                })
+                            )
+                            .stroke(.blue, lineWidth: 4)
+                        }
+                    }
+                    
+                    if selectedVehicleHistory.count > 1 {
+                        MapPolyline(
+                            coordinates: selectedVehicleHistory
+                        )
+                        .stroke(.orange, lineWidth: 6)
+                    }
+                    
                     ForEach(
-                        Array(viewModel.vehicles.values),
+                        Array(filteredVehicles),
                         id: \.id
                     ) { vehicle in
                         Marker(
@@ -73,13 +125,14 @@ struct FleetView: View {
                         )
                         .tag(vehicle.id)
                     }
+                    
                 }
                 .frame(maxHeight: .infinity)
 
-                TextField("Search vehicles", text: $searchText)
-                    .textFieldStyle(.roundedBorder)
-                    .padding(.horizontal)
-                    .padding(.vertical, 8)
+//                TextField("Search vehicles", text: $searchText)
+//                    .textFieldStyle(.roundedBorder)
+//                    .padding(.horizontal)
+//                    .padding(.vertical, 8)
                 
                 List {
                     Section("Vehicles") {
@@ -87,7 +140,7 @@ struct FleetView: View {
                             Array(filteredVehicles),
                             id: \.id
                         ) { vehicle in
-                            VehicleRow(vehicle: vehicle)
+                            VehicleRow(vehicle: vehicle, currentTime: currentTime)
                                 .contentShape(Rectangle())
                                 .onTapGesture {
                                     selectedVehicleID = vehicle.id
@@ -108,9 +161,9 @@ struct FleetView: View {
                         }
                     }
                 }
-//                .listStyle(.insetGrouped)
+                .listStyle(.plain)
             }
-//            .navigationTitle("Fleet Tracker")
+            .toolbarVisibility(.hidden, for: .navigationBar)
             .onAppear {
                 viewModel.start()
             }
@@ -123,11 +176,17 @@ struct FleetView: View {
                 }
             )) { vehicle in
                 VStack {
-                    VehicleDetailsCard(vehicle: vehicle)
-                        .presentationDetents([.height(250)])
+                    VehicleDetailsCard(vehicle: vehicle, viewModel: viewModel)
+                        .presentationDetents([.height(320)])
                     Spacer()
                 }
                 
+            }
+            .task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(1))
+                    currentTime = Date()
+                }
             }
         }
     }
@@ -135,6 +194,7 @@ struct FleetView: View {
 
 struct VehicleDetailsCard: View {
     let vehicle: Vehicle
+    let viewModel: FleetViewModel
 
     var vehicleStatus: String {
         vehicle.location.speed > 0 ? "Moving" : "Stopped"
@@ -211,9 +271,23 @@ struct VehicleDetailsCard: View {
                 )
                 .font(.caption)
             }
+            
+            HStack {
+                Label("Distance", systemImage: "road.lanes")
+
+                Spacer()
+
+                Text(
+                    "\(viewModel.distanceTravelled(for: vehicle.id) / 1000, specifier: "%.2f") km"
+                )
+                .fontWeight(.semibold)
+            }
+            
+            Text("Location history is being recorded")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .padding()
-        .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 20))
         .shadow(radius: 8)
     }
@@ -246,14 +320,36 @@ struct DashboardStat: View {
 
 struct VehicleRow: View {
     let vehicle: Vehicle
+    let currentTime: Date
+    
+    var isOnline: Bool {
+        vehicle.isOnline(at: currentTime)
+    }
 
     var isMoving: Bool {
         vehicle.location.speed > 0
     }
+    
+    var statusColor: Color {
+        if !isOnline {
+            return .red
+        }
+
+        return isMoving ? .green : .orange
+    }
+    
+    var statusText: String {
+        if !isOnline {
+            return "Offline"
+        }
+        
+        return isMoving ? "Moving" : "Stopped"
+    }
+
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "car.fill")
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "car.side.fill")
                 .font(.title2)
                 .foregroundStyle(isMoving ? .green : .secondary)
 
@@ -266,14 +362,21 @@ struct VehicleRow: View {
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                
+                Text(
+                    vehicle.lastUpdate,
+                    style: .relative
+                )
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             }
 
             Spacer()
 
-            Text(isMoving ? "Moving" : "Stopped")
-                .font(.caption)
-                .fontWeight(.semibold)
-                .foregroundStyle(isMoving ? .green : .secondary)
+            Text(statusText)
+            .font(.caption)
+            .fontWeight(.semibold)
+            .foregroundStyle(statusColor)
         }
         .padding(.vertical, 4)
     }
